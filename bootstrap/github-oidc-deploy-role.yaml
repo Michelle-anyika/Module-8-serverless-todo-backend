@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Module 8 - one-time bootstrap. IAM role assumed by GitHub Actions (OIDC) in the
+  backend and frontend repositories to run the SAM pipeline and Amplify deployments.
+  Deploy once:
+    aws cloudformation deploy --template-file bootstrap/github-oidc-deploy-role.yaml \
+      --stack-name module-8-github-oidc --capabilities CAPABILITY_NAMED_IAM --region eu-north-1
+
+Parameters:
+  GitHubOwner:
+    Type: String
+    Default: Michelle-anyika
+  BackendRepo:
+    Type: String
+    Default: Module-8-serverless-todo-backend
+  FrontendRepo:
+    Type: String
+    Default: Module-8-serverless-todo-frontend
+  OidcProviderArn:
+    Type: String
+    Default: ""
+    Description: Existing GitHub OIDC provider ARN (leave empty to use token.actions.githubusercontent.com in this account).
+
+Conditions:
+  UseDefaultProvider: !Equals [!Ref OidcProviderArn, ""]
+
+Resources:
+  DeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: module-8-github-actions-deploy
+      Description: GitHub Actions OIDC deploy role for the Module 8 serverless to-do app
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !If
+                - UseDefaultProvider
+                - !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com
+                - !Ref OidcProviderArn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub:
+                  - !Sub repo:${GitHubOwner}/${BackendRepo}:ref:refs/heads/main
+                  - !Sub repo:${GitHubOwner}/${FrontendRepo}:ref:refs/heads/main
+      Policies:
+        - PolicyName: module-8-deploy
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: CloudFormationStack
+                Effect: Allow
+                Action: cloudformation:*
+                Resource:
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/module-8-serverless-todo/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:${AWS::AccountId}:stack/aws-sam-cli-managed-default/*
+                  - !Sub arn:${AWS::Partition}:cloudformation:${AWS::Region}:aws:transform/Serverless-2016-10-31
+              - Sid: CloudFormationRead
+                Effect: Allow
+                Action:
+                  - cloudformation:ValidateTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:ListStacks
+                Resource: "*"
+              - Sid: SamArtifactBucket
+                Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:PutObject
+                  - s3:ListBucket
+                  - s3:GetBucketLocation
+                Resource:
+                  - arn:aws:s3:::aws-sam-cli-managed-default-*
+                  - arn:aws:s3:::aws-sam-cli-managed-default-*/*
+              - Sid: StackServices
+                Effect: Allow
+                Action:
+                  - lambda:*
+                  - apigateway:*
+                  - dynamodb:*
+                  - cognito-idp:*
+                  - sns:*
+                  - sqs:*
+                  - scheduler:*
+                  - logs:*
+                  - cloudwatch:*
+                  - xray:*
+                  - amplify:*
+                Resource: "*"
+                Condition:
+                  StringEquals:
+                    aws:RequestedRegion: !Ref AWS::Region
+              - Sid: StackRoles
+                Effect: Allow
+                Action:
+                  - iam:CreateRole
+                  - iam:DeleteRole
+                  - iam:GetRole
+                  - iam:UpdateRole
+                  - iam:TagRole
+                  - iam:UntagRole
+                  - iam:PutRolePolicy
+                  - iam:GetRolePolicy
+                  - iam:DeleteRolePolicy
+                  - iam:AttachRolePolicy
+                  - iam:DetachRolePolicy
+                  - iam:UpdateAssumeRolePolicy
+                  - iam:ListRolePolicies
+                  - iam:ListAttachedRolePolicies
+                  - iam:PassRole
+                Resource: !Sub arn:${AWS::Partition}:iam::${AWS::AccountId}:role/module-8-*
+
+Outputs:
+  DeployRoleArn:
+    Value: !GetAtt DeployRole.Arn

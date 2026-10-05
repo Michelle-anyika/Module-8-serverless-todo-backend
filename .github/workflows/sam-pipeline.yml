@@ -1,0 +1,64 @@
+name: SAM pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: sam-deploy
+  cancel-in-progress: false
+
+env:
+  AWS_REGION: eu-north-1
+  STACK_NAME: module-8-serverless-todo
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - name: Validate template (cfn-lint)
+        run: sam validate --lint --region $AWS_REGION
+      - name: Unit tests
+        run: |
+          pip install boto3 pytest
+          PYTHONPATH=src python -m pytest -q tests
+
+  deploy:
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: test
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - uses: aws-actions/setup-sam@v2
+        with:
+          use-installer: true
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+      - run: sam build
+      - run: sam deploy --no-progressbar
+      - name: Smoke test - API rejects unauthenticated calls
+        run: |
+          API=$(aws cloudformation describe-stacks --stack-name $STACK_NAME \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" --output text)
+          CODE=$(curl -s -o /dev/null -w '%{http_code}' "$API/tasks")
+          echo "GET /tasks without token -> $CODE"
+          test "$CODE" = "401"

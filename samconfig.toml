@@ -1,0 +1,20 @@
+version = 0.1
+
+[default.global.parameters]
+stack_name = "module-8-serverless-todo"
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.validate.parameters]
+lint = true
+
+[default.deploy.parameters]
+region = "eu-north-1"
+capabilities = "CAPABILITY_IAM CAPABILITY_NAMED_IAM"
+resolve_s3 = true
+s3_prefix = "module-8-serverless-todo"
+confirm_changeset = false
+fail_on_empty_changeset = false
+tags = "Project=module-8-serverless-todo"
